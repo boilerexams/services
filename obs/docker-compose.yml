@@ -1,0 +1,66 @@
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    networks: [observability]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    networks: [observability]
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3000:3000"
+    depends_on: [prometheus, loki]
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:2.9.6
+    container_name: loki
+    networks: [observability]
+    command: [ "-config.file=/etc/loki/config.yml" ]
+    # volumes for loki are provided via docker-compose.override.yml
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:2.9.6
+    container_name: promtail
+    networks: [observability]
+    command: [ "-config.file=/etc/promtail/config.yml" ]
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on: [loki]
+    restart: unless-stopped
+
+  casvisor:
+    image: casbin/casvisor-all-in-one:latest
+    container_name: casvisor
+    networks: [observability]
+    ports:
+      - "16001:16001"
+    depends_on: [prometheus, loki]
+    restart: unless-stopped
+
+networks:
+  observability:
+    external: true
+
+volumes:
+  grafana_data:
+  loki_data:

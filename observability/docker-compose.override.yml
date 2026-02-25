@@ -60,35 +60,23 @@ services:
     restart: unless-stopped
 
   # ---- Cachet Status Page ----
-  cachet-db:
-    image: postgres:15-alpine
-    container_name: cachet-db
-    environment:
-      - POSTGRES_DB=cachet
-      - POSTGRES_USER=cachet
-      - POSTGRES_PASSWORD=cachet
-    volumes:
-      - /data/cachet/db:/var/lib/postgresql/data
-    networks: [observability]
-    restart: unless-stopped
-
   cachet:
     build:
       context: ./cachet
       dockerfile: Dockerfile
     container_name: cachet
-    depends_on: [cachet-db]
+    depends_on: [coolify-db]
     networks: [observability]
     ports:
       - "8001:80"
     environment:
       - APP_URL=http://10.0.1.15:8001
       - DB_CONNECTION=pgsql
-      - DB_HOST=cachet-db
+      - DB_HOST=coolify-db
       - DB_PORT=5432
       - DB_DATABASE=cachet
-      - DB_USERNAME=cachet
-      - DB_PASSWORD=cachet
+      - DB_USERNAME=coolify
+      - DB_PASSWORD=coolify
       - CACHET_ADMIN_USER=admin
       - CACHET_ADMIN_EMAIL=admin@example.com
       - CACHET_ADMIN_PASSWORD=admin123

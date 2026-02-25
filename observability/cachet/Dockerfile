@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     libxml2-dev \
     libpq-dev \
     libonig-dev \
+    libicu-dev \
     unzip \
     postgresql-client \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
@@ -32,8 +33,8 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /var/www/html /var/cache/nginx /var/run/nginx \
-    && chown -R www-data:www-data /var/www/html /var/cache/nginx /var/run/nginx
+RUN mkdir -p /var/www/html /var/cache/nginx /var/run/nginx /var/lib/nginx /var/log/supervisor \
+    && chown -R www-data:www-data /var/www/html /var/cache/nginx /var/run/nginx /var/lib/nginx
 
 COPY conf/nginx.conf /etc/nginx/nginx.conf
 COPY conf/nginx-site.conf /etc/nginx/sites-available/default
@@ -45,10 +46,16 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 WORKDIR /var/www/html
 
-RUN git clone -b 3.x https://github.com/cachethq/cachet.git . \
-    && rm -rf /var/www/html/.git
+RUN rm -rf /var/www/html/* \
+    && git clone -b 3.x --depth 1 https://github.com/cachethq/cachet.git /var/www/html/ \
+    && rm -rf /var/www/html/.git \
+    && cp /var/www/html/.env.example /var/www/html/.env \
+    && mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache \
+    && composer install --no-dev -o --no-interaction \
+    && composer update cachethq/core --no-interaction --no-dev || true
 
-USER www-data
+RUN chown -R www-data:www-data /var/www/html
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

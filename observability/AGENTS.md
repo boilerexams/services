@@ -45,7 +45,7 @@ make clean
 Cachet provides a public status page for Boilerexams services.
 
 - **URL**: http://10.0.1.15:8001
-- **Admin**: http://10.0.1.15:8001/login
+- **Admin**: http://10.0.1.15:8001/dashboard/login
 - **Credentials**: admin@example.com / admin123
 
 ### Build & Run Cachet Only
@@ -80,9 +80,43 @@ make cachet-logs
 
 All services run on the `observability` Docker network (must be created via `make network`).
 
+## Current Status Page Configuration
+
+### Components (4)
+
+| ID | Name | Description | Status | Link |
+|----|------|-------------|--------|------|
+| 1 | Backend API | boilerexams-backend-v3 - Main API server | Operational | https://api.boilerexams.com/ |
+| 2 | Database | PostgreSQL - Primary data store | Operational | - |
+| 3 | Redis | Coolify Redis - Session and cache store | Operational | - |
+| 4 | Status Page | Cachet - Boilerexams observability status page | Operational | http://10.0.1.15:8001 |
+
+### Metrics (1)
+
+| ID | Name | Suffix | Description | Default Value |
+|----|------|--------|-------------|---------------|
+| 1 | Backend API Response Time | ms | Response time from api.boilerexams.com/health | 150.00 |
+
+### API Token
+
+An API token has been created for the admin user (`admin@example.com`). To regenerate or create a new token:
+
+```bash
+docker compose exec cachet php artisan tinker --execute="
+\$user = \App\Models\User::where('email', 'admin@example.com')->first();
+\$token = \$user->createToken('automated-setup')->plainTextToken;
+echo \$token;
+"
+```
+
+The API uses Bearer token authentication:
+```bash
+curl -H "Authorization: Bearer <token>" -H "Accept: application/json" http://10.0.1.15:8001/api/components
+```
+
 ## Implementation Plan
 
-### Phase 1: Cachet Setup & Database Configuration
+### Phase 1: Cachet Setup & Database Configuration ✅ COMPLETE
 
 1. **Create the observability network**
    ```bash
@@ -91,7 +125,7 @@ All services run on the `observability` Docker network (must be created via `mak
 
 2. **Start Coolify dependencies** (shared database)
    ```bash
-   docker compose up -d coolify-db coolify-redis
+   docker compose up -d coolify-db
    ```
 
 3. **Build and start Cachet**
@@ -102,52 +136,77 @@ All services run on the `observability` Docker network (must be created via `mak
 4. **Verify Cachet is running**
    ```bash
    docker compose ps cachet
-   curl -s http://10.0.1.15:8001 | head -20
    ```
 
-### Phase 2: API Monitoring Configuration
+### Phase 2: API Monitoring Configuration ✅ COMPLETE
 
-1. **Identify boilerexams-backend-v3 endpoints to monitor**
-   - Health check endpoint (e.g., `/health`, `/api/health`)
-   - API gateway endpoints
-   - Authentication service
-   - Core API endpoints
+Components and metrics have been created via the Cachet API. The following services are tracked:
 
-2. **Configure Cachet components**
-   - Log into Cachet admin panel at http://10.0.1.15:8001/login
-   - Create Components for each monitored service:
-     - Backend API (boilerexams-backend-v3)
-     - Database
-     - Cache/Redis
-     - Frontend (if applicable)
-   - Create Metrics for response time and uptime
-   - Set up Incidents template
+- **Backend API** - monitors https://api.boilerexams.com/
+- **Database** - PostgreSQL (coolify-db)
+- **Redis** - Coolify Redis (coolify-redis)
+- **Status Page** - self-monitoring Cachet
 
-3. **Add health check endpoints to backend**
-   - Ensure `boilerexams-backend-v3` exposes a `/health` endpoint
-   - Configure health check to return JSON with service status
+#### Backend Health Endpoint
 
-### Phase 3: Coolify Integration
+The `boilerexams-backend-v3` already exposes a `/health` endpoint at `https://api.boilerexams.com/health`:
+```json
+{
+  "uptime": "2h 34m 12s",
+  "active_users": 42,
+  "daily_users": 156
+}
+```
+This endpoint is NOT rate-limited and does NOT require authentication.
 
-1. **Configure Coolify as uptime monitor**
-   - Access Coolify at http://10.0.1.15:8000
-   - Set up monitoring for all Boilerexams services
-   - Configure uptime checks for:
-     - Backend API endpoints
-     - Frontend applications
-     - Database connectivity
-     - Cachet status page itself
+### Phase 3: Coolify Integration (TODO)
 
-2. **Link Coolify monitoring data to Cachet**
-   - Use Coolify webhooks to notify Cachet of status changes
-   - Configure automatic incident creation in Cachet when Coolify detects downtime
-   - Set up status synchronization between both platforms
+#### How to Configure Coolify as Uptime Monitor
 
-### Phase 4: Prometheus & Grafana Integration
+1. **Access Coolify** at http://10.0.1.15:8000
+2. **Add monitored services**:
+   - Go to "Resources" → "Add Resource" → "External Service"
+   - Add the following endpoints:
+     - `https://api.boilerexams.com/health` (Backend API)
+     - `http://10.0.1.15:8001` (Cachet Status Page)
+     - Any frontend URLs
+3. **Configure uptime checks**:
+   - Set check interval (default: 60s)
+   - Configure alert notifications (email, Discord, webhook)
+   - Set expected response codes (200)
+
+#### How to Link Coolify to Cachet
+
+Coolify can notify Cachet of status changes via webhooks:
+
+1. In Coolify, go to the monitored service → "Notifications"
+2. Add a webhook pointing to Cachet's incident API:
+   ```
+   POST http://10.0.1.15:8001/api/incidents
+   Headers:
+     Authorization: Bearer <cachet-api-token>
+     Content-Type: application/json
+   Body:
+     {
+       "name": "Service Outage Detected",
+       "message": "Coolify detected downtime on {service_name}",
+       "status": 3,
+       "visible": 1
+     }
+   ```
+3. Configure status codes:
+   - Status 1 = Investigating
+   - Status 2 = Identified
+   - Status 3 = Watching
+   - Status 4 = Fixed
+
+Alternatively, use Coolify's Discord notifications and have a separate script bridge Discord → Cachet.
+
+### Phase 4: Prometheus & Grafana Integration (TODO)
 
 1. **Configure Prometheus to scrape backend metrics**
    - Update `prometheus/prometheus.yml` with backend targets
-   - Add job for boilerexams-backend-v3 metrics endpoint
+   - Note: backend currently has no `/metrics` endpoint; would need to add Prometheus Go client
 
 2. **Create Grafana dashboards**
    - API response times
@@ -157,7 +216,7 @@ All services run on the `observability` Docker network (must be created via `mak
 
 ## Verification Steps
 
-### After Phase 1 (Cachet Setup)
+### Cachet Status Page
 ```bash
 # Verify Cachet container is running
 docker compose ps cachet
@@ -165,41 +224,37 @@ docker compose ps cachet
 # Check Cachet logs
 make cachet-logs
 
-# Test admin login
-curl -X POST http://10.0.1.15:8001/login \
-  -d "email=admin@example.com&password=admin123"
-
 # Verify database connection
 docker compose exec cachet psql -h coolify-db -U coolify -d cachet -c "SELECT 1"
+
+# List components via API
+docker compose exec cachet curl -s http://localhost:80/api/components \
+  -H "Authorization: Bearer <token>" -H "Accept: application/json"
+
+# List metrics via API
+docker compose exec cachet curl -s http://localhost:80/api/metrics \
+  -H "Authorization: Bearer <token>" -H "Accept: application/json"
 ```
 
-### After Phase 2 (API Monitoring)
+### Backend API
 ```bash
 # Test backend health endpoint
-curl http://<backend-host>:<port>/health
+curl https://api.boilerexams.com/health
 
-# Verify Cachet API is accessible
-curl http://10.0.1.15:8001/api/v1/components
-
-# Check Cachet components are listed
-curl -H "X-Cachet-Token: <api-token>" http://10.0.1.15:8001/api/v1/components
+# Expected response:
+# {"uptime":"...","active_users":N,"daily_users":N}
 ```
 
-### After Phase 3 (Coolify Integration)
+### Coolify (when configured)
 ```bash
 # Verify Coolify is running
 docker compose ps coolify
 
-# Check Coolify monitoring status
+# Check Coolify health
 curl http://10.0.1.15:8000/api/health
-
-# Verify webhook connectivity
-curl -X POST http://10.0.1.15:8001/api/v1/incidents \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Test Incident","message":"Testing webhook","status":1}'
 ```
 
-### After Phase 4 (Prometheus & Grafana)
+### Prometheus & Grafana (when configured)
 ```bash
 # Verify Prometheus targets
 curl http://10.0.1.15:9090/api/v1/targets
@@ -224,6 +279,11 @@ docker compose restart cachet
 # Rebuild Cachet
 docker compose down cachet
 docker compose build cachet
+docker compose up -d cachet
+
+# Reset database (WARNING: deletes all data)
+docker compose down cachet
+docker compose exec coolify-db psql -U coolify -d postgres -c "DROP DATABASE cachet"
 docker compose up -d cachet
 ```
 
@@ -281,16 +341,16 @@ docker compose exec cachet ping coolify-db
 ## API Monitoring Endpoints
 
 ### boilerexams-backend-v3
-- **Health**: `/health` (to be implemented)
-- **Metrics**: `/metrics` (to be implemented)
-- **API**: `/api/v1/*`
+- **Health**: `https://api.boilerexams.com/health` ✅ Available
+- **Metrics**: `/metrics` (not implemented - would need Go Prometheus client)
+- **API**: `https://api.boilerexams.com/api/v1/*`
 
 ### Services to Monitor
-1. Backend API (boilerexams-backend-v3)
+1. Backend API (boilerexams-backend-v3) - https://api.boilerexams.com/
 2. Database (PostgreSQL via coolify-db)
 3. Cache (Redis via coolify-redis)
-4. Status Page (Cachet)
-5. Deployment Platform (Coolify)
+4. Status Page (Cachet) - http://10.0.1.15:8001
+5. Deployment Platform (Coolify) - http://10.0.1.15:8000
 
 ## Maintenance
 
@@ -299,8 +359,22 @@ docker compose exec cachet ping coolify-db
 - Update Grafana dashboards as needed
 - Rotate admin passwords quarterly
 - Monitor disk usage for /data/coolify
+- Regenerate API tokens periodically
 
 ### Backup Strategy
 - Database: PostgreSQL dumps from coolify-db
 - Configuration: Git version control for all config files
 - Cachet: Export components and metrics via API
+
+### Adding New Components
+```bash
+# Via API
+TOKEN="<your-api-token>"
+curl -X POST http://10.0.1.15:8001/api/components \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -d '{"name":"New Service","description":"Description here","status":1,"enabled":true}'
+
+# Status values: 1=Operational, 2=Performance Issues, 3=Partial Outage, 4=Major Outage, 0=Unknown
+```
